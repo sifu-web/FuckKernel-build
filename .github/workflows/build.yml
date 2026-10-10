@@ -11,18 +11,112 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Set up NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r26d
 
-      - name: Build with ndk-build
-        run: |
-          ${{ steps.setup-ndk.outputs.ndk-path }}/ndk-build -C jni
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Upload binary
+      - name: Build binary with ndk-build
+        run: |
+          ${{ steps.setup-ndk.outputs.ndk-path }}/ndk-build \
+            NDK_PROJECT_PATH=. \
+            NDK_APPLICATION_MK=jni/Application.mk \
+            APP_BUILD_SCRIPT=jni/Android.mk
+
+      - name: Build APK
+        run: |
+          ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/android-34/android.jar"
+          BIN="libs/arm64-v8a/stranger.sh"
+          WORK="apkwrap"
+          mkdir -p $WORK/{assets,src/com/stranger/launcher,classes,build}
+          cp $BIN $WORK/assets/stranger
+
+          cat > $WORK/AndroidManifest.xml << 'MANIFEST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.stranger.launcher"
+              android:versionCode="1" android:versionName="1.0">
+              <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+              <application android:label="Stranger">
+                  <activity android:name=".MainActivity" android:exported="true"
+                      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFEST
+
+          cat > $WORK/src/com/stranger/launcher/MainActivity.java << 'JAVA'
+          package com.stranger.launcher;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.widget.Toast;
+          import java.io.*;
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  try {
+                      File out = new File(getFilesDir(), "stranger");
+                      InputStream in = getAssets().open("stranger");
+                      FileOutputStream fo = new FileOutputStream(out);
+                      byte[] buf = new byte[8192]; int n;
+                      while ((n = in.read(buf)) > 0) fo.write(buf, 0, n);
+                      fo.close(); in.close();
+                      String dst = "/data/local/tmp/stranger";
+                      Process p = Runtime.getRuntime().exec(new String[]{"su","-c",
+                          "cp "+out.getAbsolutePath()+" "+dst+
+                          " && chmod 755 "+dst+
+                          " && (nohup "+dst+" >/dev/null 2>&1 &)"});
+                      p.waitFor();
+                      Toast.makeText(this,"Stranger Started",Toast.LENGTH_SHORT).show();
+                  } catch(Exception e) {
+                      Toast.makeText(this,"Error: "+e.getMessage(),Toast.LENGTH_LONG).show();
+                  }
+                  finish();
+              }
+          }
+          JAVA
+
+          javac -source 8 -target 8 -bootclasspath $ANDROID_JAR \
+            -d $WORK/classes \
+            $WORK/src/com/stranger/launcher/MainActivity.java
+
+          dx --dex --output=$WORK/build/classes.dex $WORK/classes
+
+          aapt package -f -M $WORK/AndroidManifest.xml \
+            -I $ANDROID_JAR -A $WORK/assets \
+            -F $WORK/build/unsigned.apk
+
+          cp $WORK/build/classes.dex .
+          aapt add $WORK/build/unsigned.apk classes.dex
+
+          keytool -genkey -v -keystore stranger.keystore -alias stranger \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass stranger123 -keypass stranger123 \
+            -dname "CN=Stranger,O=Stranger,C=BD"
+
+          zipalign -f -p 4 $WORK/build/unsigned.apk $WORK/build/aligned.apk
+
+          apksigner sign --ks stranger.keystore \
+            --ks-pass pass:stranger123 --key-pass pass:stranger123 \
+            --out Stranger.apk $WORK/build/aligned.apk
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: stranger-binary
-          path: libs/arm64-v8a/stranger.sh
+          name: Stranger-APK
+          path: Stranger.apk
