@@ -23,10 +23,9 @@ jobs:
         with:
           ndk-version: r26d
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
+      - name: Accept Android Licenses & Setup SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Build binary with ndk-build
         run: |
@@ -37,7 +36,7 @@ jobs:
 
       - name: Build APK
         run: |
-          ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/android-34/android.jar"
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
           BIN="libs/arm64-v8a/stranger.sh"
           WORK="apkwrap"
           mkdir -p $WORK/{assets,src/com/stranger/launcher,classes,build}
@@ -97,23 +96,24 @@ jobs:
             -d $WORK/classes \
             $WORK/src/com/stranger/launcher/MainActivity.java
 
-          dx --dex --output=$WORK/build/classes.dex $WORK/classes
+          $ANDROID_HOME/build-tools/34.0.0/d8 --output $WORK/build/classes.dex $(find $WORK/classes -name "*.class")
 
-          aapt package -f -M $WORK/AndroidManifest.xml \
+          $ANDROID_HOME/build-tools/34.0.0/aapt package -f -M $WORK/AndroidManifest.xml \
             -I $ANDROID_JAR -A $WORK/assets \
             -F $WORK/build/unsigned.apk
 
-          cp $WORK/build/classes.dex .
-          aapt add $WORK/build/unsigned.apk classes.dex
+          cd $WORK/build
+          $ANDROID_HOME/build-tools/34.0.0/aapt add unsigned.apk classes.dex
+          cd ../..
 
           keytool -genkey -v -keystore stranger.keystore -alias stranger \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass stranger123 -keypass stranger123 \
             -dname "CN=Stranger,O=Stranger,C=BD"
 
-          zipalign -f -p 4 $WORK/build/unsigned.apk $WORK/build/aligned.apk
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -f -p 4 $WORK/build/unsigned.apk $WORK/build/aligned.apk
 
-          apksigner sign --ks stranger.keystore \
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks stranger.keystore \
             --ks-pass pass:stranger123 --key-pass pass:stranger123 \
             --out Stranger.apk $WORK/build/aligned.apk
 
