@@ -1,0 +1,28 @@
+name: Build FuckKernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26d
+
+      - name: Build with ndk-build
+        run: |
+          ${{ steps.setup-ndk.outputs.ndk-path }}/ndk-build -C jni
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: stranger-binary
+          path: libs/arm64-v8a/stranger.sh
