@@ -96,7 +96,7 @@ jobs:
             -d $WORK/classes \
             $WORK/src/com/stranger/launcher/MainActivity.java
 
-          $ANDROID_HOME/build-tools/34.0.0/d8 --output $WORK/build/classes.dex $(find $WORK/classes -name "*.class")
+          $ANDROID_HOME/build-tools/34.0.0/d8 --output $WORK/build $(find $WORK/classes -name "*.class")
 
           $ANDROID_HOME/build-tools/34.0.0/aapt package -f -M $WORK/AndroidManifest.xml \
             -I $ANDROID_JAR -A $WORK/assets \
